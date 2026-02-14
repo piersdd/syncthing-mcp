@@ -100,7 +100,7 @@ def _format_bytes(n: int) -> str:
 
 
 @asynccontextmanager
-async def app_lifespan():
+async def app_lifespan(app):
     if not SYNCTHING_API_KEY:
         print("WARNING: SYNCTHING_API_KEY is not set. API calls will fail.")
     yield {}
