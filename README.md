@@ -12,20 +12,103 @@ This MCP server exposes that information as structured tool calls, so you can as
 
 ## Tools
 
+### Instance Management
+
+| Tool | Description | Mutating |
+|------|-------------|----------|
+| `syncthing_list_instances` | List all configured instances, probe availability | No |
+
+### System Status & Monitoring
+
 | Tool | Description | Mutating |
 |------|-------------|----------|
 | `syncthing_system_status` | Device ID, name, uptime, version | No |
 | `syncthing_list_folders` | All folders with paths, types, and shared device lists | No |
 | `syncthing_list_devices` | All devices with connection status and last seen | No |
+| `syncthing_connections` | Active connection details (addresses, crypto, throughput) | No |
+| `syncthing_system_errors` | Recent system errors and warnings | No |
+| `syncthing_clear_errors` | Clear the system error log | Yes |
+| `syncthing_system_log` | Recent log entries with timestamps and levels | No |
+| `syncthing_recent_changes` | Recent file change events (local + remote) | No |
+| `syncthing_health_summary` | Single-call health overview: status, alerts, folder/device/pending counts | No |
+
+### Folder Status & Replication
+
+| Tool | Description | Mutating |
+|------|-------------|----------|
 | `syncthing_folder_status` | Detailed status for a single folder (files, bytes, sync state) | No |
 | `syncthing_folder_completion` | Per-device completion % for a folder | No |
 | `syncthing_replication_report` | Analyses all folders, flags safe-to-remove, calculates reclaimable space | No |
-| `syncthing_device_completion` | Aggregated completion for a device across all shared folders | No |
-| `syncthing_connections` | Active connection details (addresses, crypto, throughput) | No |
 | `syncthing_folder_errors` | Current sync errors for a folder | No |
+
+### Device Status
+
+| Tool | Description | Mutating |
+|------|-------------|----------|
+| `syncthing_device_completion` | Aggregated completion for a device across all shared folders | No |
+
+### Folder Operations
+
+| Tool | Description | Mutating |
+|------|-------------|----------|
 | `syncthing_scan_folder` | Trigger an immediate rescan | Yes |
 | `syncthing_pause_folder` | Pause a folder (prevents deletion propagation) | Yes |
 | `syncthing_resume_folder` | Resume a paused folder | Yes |
+
+### Config Mutation: Pending Devices & Folders
+
+| Tool | Description | Mutating |
+|------|-------------|----------|
+| `syncthing_pending_devices` | List pending device connection requests | No |
+| `syncthing_pending_folders` | List pending folder share offers | No |
+| `syncthing_accept_device` | Accept a pending device (adds to config with defaults) | Yes |
+| `syncthing_reject_device` | Dismiss a pending device request | Yes |
+| `syncthing_accept_folder` | Accept a pending folder offer (uses folder defaults template) | Yes |
+| `syncthing_reject_folder` | Dismiss a pending folder offer | Yes |
+
+### Config Mutation: Restart & Ignore Patterns
+
+| Tool | Description | Mutating |
+|------|-------------|----------|
+| `syncthing_restart_required` | Check if config changes require a restart | No |
+| `syncthing_restart` | Restart the Syncthing service | Yes |
+| `syncthing_get_ignores` | Get .stignore patterns for a folder | No |
+| `syncthing_set_ignores` | Set .stignore patterns for a folder (replaces all) | Yes |
+| `syncthing_get_default_ignores` | Get default ignore patterns for new folders | No |
+| `syncthing_set_default_ignores` | Set default ignore patterns for new folders | Yes |
+
+## Multi-Instance Support
+
+Connect to multiple Syncthing nodes simultaneously by setting the `SYNCTHING_INSTANCES` environment variable with a JSON object:
+
+```json
+{
+  "mini":  {"url": "http://mini.local:8384",  "api_key": "abc123"},
+  "tn-sb": {"url": "http://tn-sb.local:8384", "api_key": "def456"},
+  "tn-mr2": {"url": "http://tn-mr2.local:8384", "api_key": "ghi789"}
+}
+```
+
+Every tool accepts an optional `instance` parameter to target a specific node. When only one instance is configured, the parameter can be omitted.
+
+### Claude Desktop config (multi-instance)
+
+```json
+{
+  "mcpServers": {
+    "syncthing": {
+      "command": "uv",
+      "args": [
+        "--directory", "/path/to/syncthing-mcp",
+        "run", "syncthing_mcp.py"
+      ],
+      "env": {
+        "SYNCTHING_INSTANCES": "{\"mini\":{\"url\":\"http://mini.local:8384\",\"api_key\":\"abc123\"},\"tn-sb\":{\"url\":\"http://tn-sb.local:8384\",\"api_key\":\"def456\"}}"
+      }
+    }
+  }
+}
+```
 
 ## Safe Removal Workflow
 
@@ -61,7 +144,7 @@ Open the Syncthing web UI → Actions → Settings → API Key.
 
 Alternatively, find it in your Syncthing config file under `<gui><apikey>`.
 
-### Configure Claude Desktop
+### Configure Claude Desktop (single instance)
 
 Add to your Claude Desktop MCP config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
@@ -87,27 +170,27 @@ Add to your Claude Desktop MCP config (`~/Library/Application Support/Claude/cla
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYNCTHING_API_KEY` | Yes | — | API key from Syncthing settings |
-| `SYNCTHING_URL` | No | `http://localhost:8384` | Base URL for the Syncthing REST API |
+| `SYNCTHING_API_KEY` | Yes* | — | API key (single-instance mode) |
+| `SYNCTHING_URL` | No | `http://localhost:8384` | Base URL (single-instance mode) |
+| `SYNCTHING_INSTANCES` | No | — | JSON object for multi-instance mode (overrides the above) |
+
+\* Required unless `SYNCTHING_INSTANCES` is set.
 
 ## Roadmap
 
-This server is the foundation for a broader goal: a **Syncthing dataset dashboard** that provides ongoing visibility into synchronisation health across a fleet of devices.
-
 Planned directions include:
 
-- **Multi-instance support** — query multiple Syncthing nodes (e.g. NAS, servers, laptops) from a single MCP session, enabling cross-fleet replication views
-- **Event stream integration** — subscribe to Syncthing's `/rest/events` endpoint for real-time sync status, conflict detection, and error alerting
-- **Historical tracking** — persist folder size and completion data over time to surface trends (growth rate, sync frequency, stale folders)
-- **Conflict management** — surface and resolve sync conflicts through tool calls rather than manual file inspection
-- **Ignore pattern management** — read and update `.stignore` rules per folder
+- **Event stream integration** — subscribe to Syncthing's `/rest/events` endpoint for real-time sync status and conflict detection
+- **Historical tracking** — persist folder size and completion data over time to surface trends
+- **Conflict management** — surface and resolve sync conflicts through tool calls
 - **Folder lifecycle tools** — add/remove folders and device sharing relationships programmatically
-- **Dashboard artifact** — a standalone HTML/React view that visualises replication topology, per-folder health, and reclaimable space across all nodes
+- **Dashboard artifact** — a standalone HTML/React view that visualises replication topology across all nodes
 
 ## Performance Notes
 
 - `syncthing_folder_status` and `syncthing_replication_report` call Syncthing's `/rest/db/status` endpoint, which the Syncthing docs describe as "an expensive call, increasing CPU and RAM usage on the device." Use judiciously on low-power hardware.
 - The replication report makes one `/rest/db/completion` call per remote device per folder. On setups with many folders and devices, this can generate significant API traffic.
+- `syncthing_health_summary` calls `/rest/db/status` for each folder — equivalent cost to the replication report.
 
 ## Contributing
 
