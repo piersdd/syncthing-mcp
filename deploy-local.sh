@@ -12,11 +12,12 @@ rsync -a --delete \
   --exclude '__pycache__' \
   --exclude '*.pyc' \
   --exclude '.DS_Store' \
+  --exclude 'tests' \
   . "$DEST/"
 
 # Install/update deps in the runtime location
 cd "$DEST"
 uv sync --quiet
 
-echo "✅ Deployed $SERVER_NAME to $DEST"
+echo "Deployed $SERVER_NAME to $DEST"
 echo "   Restart Claude Desktop to pick up changes."

@@ -10,7 +10,7 @@ Syncthing syncs folders across devices, but its web UI doesn't make it easy to a
 
 This MCP server exposes that information as structured tool calls, so you can ask an AI assistant to audit your replication status and guide you through safe cleanup.
 
-## Tools
+## Tools (36 total)
 
 ### Instance Management
 
@@ -31,6 +31,7 @@ This MCP server exposes that information as structured tool calls, so you can as
 | `syncthing_system_log` | Recent log entries with timestamps and levels | No |
 | `syncthing_recent_changes` | Recent file change events (local + remote) | No |
 | `syncthing_health_summary` | Single-call health overview: status, alerts, folder/device/pending counts | No |
+| `syncthing_check_upgrade` | Check if a newer version of Syncthing is available | No |
 
 ### Folder Status & Replication
 
@@ -55,6 +56,21 @@ This MCP server exposes that information as structured tool calls, so you can as
 | `syncthing_pause_folder` | Pause a folder (prevents deletion propagation) | Yes |
 | `syncthing_resume_folder` | Resume a paused folder | Yes |
 
+### File-Level Queries
+
+| Tool | Description | Mutating |
+|------|-------------|----------|
+| `syncthing_browse_folder` | Browse folder contents at a path prefix (directory listing from Syncthing's DB) | No |
+| `syncthing_file_info` | Detailed info about a specific file (versions, availability, conflicts) | No |
+| `syncthing_folder_need` | List out-of-sync files a folder still needs (with pagination) | No |
+
+### Conflict Resolution
+
+| Tool | Description | Mutating |
+|------|-------------|----------|
+| `syncthing_override_folder` | Override remote changes on a send-only folder (make local authoritative) | Yes |
+| `syncthing_revert_folder` | Revert local changes on a receive-only folder (pull remote state) | Yes |
+
 ### Config Mutation: Pending Devices & Folders
 
 | Tool | Description | Mutating |
@@ -76,6 +92,28 @@ This MCP server exposes that information as structured tool calls, so you can as
 | `syncthing_set_ignores` | Set .stignore patterns for a folder (replaces all) | Yes |
 | `syncthing_get_default_ignores` | Get default ignore patterns for new folders | No |
 | `syncthing_set_default_ignores` | Set default ignore patterns for new folders | Yes |
+
+## Project Structure
+
+```
+syncthing-mcp/
+├── src/syncthing_mcp/
+│   ├── __init__.py          # Package version
+│   ├── __main__.py          # Entry point
+│   ├── client.py            # SyncthingClient (HTTP methods + error handling)
+│   ├── models.py            # Pydantic input models
+│   ├── registry.py          # Multi-instance registry from env vars
+│   ├── server.py            # FastMCP server + lifespan
+│   └── tools/
+│       ├── system.py        # System status, health, errors, log, restart, upgrade
+│       ├── folders.py       # Folder status, completion, replication, operations, file queries
+│       ├── devices.py       # Device completion, connections
+│       ├── config.py        # Pending accept/reject, ignore patterns
+│       └── instances.py     # Instance listing, folder listing
+├── tests/                   # 96 tests with respx HTTP mocking
+├── pyproject.toml
+└── README.md
+```
 
 ## Multi-Instance Support
 
@@ -100,7 +138,7 @@ Every tool accepts an optional `instance` parameter to target a specific node. W
       "command": "uv",
       "args": [
         "--directory", "/path/to/syncthing-mcp",
-        "run", "syncthing_mcp.py"
+        "run", "python", "-m", "syncthing_mcp"
       ],
       "env": {
         "SYNCTHING_INSTANCES": "{\"mini\":{\"url\":\"http://mini.local:8384\",\"api_key\":\"abc123\"},\"tn-sb\":{\"url\":\"http://tn-sb.local:8384\",\"api_key\":\"def456\"}}"
@@ -155,7 +193,7 @@ Add to your Claude Desktop MCP config (`~/Library/Application Support/Claude/cla
       "command": "uv",
       "args": [
         "--directory", "/path/to/syncthing-mcp",
-        "run", "syncthing_mcp.py"
+        "run", "python", "-m", "syncthing_mcp"
       ],
       "env": {
         "SYNCTHING_API_KEY": "your-api-key-here",
@@ -164,6 +202,13 @@ Add to your Claude Desktop MCP config (`~/Library/Application Support/Claude/cla
     }
   }
 }
+```
+
+### Running Tests
+
+```bash
+uv sync
+uv run pytest -v
 ```
 
 ### Environment Variables
@@ -176,16 +221,6 @@ Add to your Claude Desktop MCP config (`~/Library/Application Support/Claude/cla
 
 \* Required unless `SYNCTHING_INSTANCES` is set.
 
-## Roadmap
-
-Planned directions include:
-
-- **Event stream integration** — subscribe to Syncthing's `/rest/events` endpoint for real-time sync status and conflict detection
-- **Historical tracking** — persist folder size and completion data over time to surface trends
-- **Conflict management** — surface and resolve sync conflicts through tool calls
-- **Folder lifecycle tools** — add/remove folders and device sharing relationships programmatically
-- **Dashboard artifact** — a standalone HTML/React view that visualises replication topology across all nodes
-
 ## Performance Notes
 
 - `syncthing_folder_status` and `syncthing_replication_report` call Syncthing's `/rest/db/status` endpoint, which the Syncthing docs describe as "an expensive call, increasing CPU and RAM usage on the device." Use judiciously on low-power hardware.
@@ -194,7 +229,7 @@ Planned directions include:
 
 ## Contributing
 
-Issues and PRs welcome. This is an early-stage project — the API surface may change as the roadmap develops.
+Issues and PRs welcome.
 
 ## License
 
