@@ -6,3 +6,4 @@ dist/
 .DS_Store
 *.old
 .pytest_cache/
+.env

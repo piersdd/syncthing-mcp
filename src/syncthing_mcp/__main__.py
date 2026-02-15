@@ -1,10 +1,47 @@
 """Entry point for `python -m syncthing_mcp` and the `syncthing-mcp` console script."""
 
-from syncthing_mcp.server import mcp
+import os
+import sys
 
 
 def main() -> None:
-    mcp.run()
+    transport = os.environ.get("MCP_TRANSPORT", "stdio").strip().lower()
+
+    if transport == "streamable-http":
+        _run_http()
+    else:
+        from syncthing_mcp.server import mcp
+
+        mcp.run()
+
+
+def _run_http() -> None:
+    """Start the Streamable HTTP server with optional bearer-token auth."""
+    from syncthing_mcp.server import mcp
+
+    host = os.environ.get("MCP_HOST", "0.0.0.0")
+    port = int(os.environ.get("MCP_PORT", "8000"))
+    token = os.environ.get("MCP_AUTH_TOKEN", "").strip()
+
+    if token:
+        # Wrap the ASGI app with bearer-token middleware and run via
+        # uvicorn directly so we keep the session-manager lifespan intact.
+        import uvicorn
+
+        from syncthing_mcp.auth import BearerAuthMiddleware
+
+        app = mcp.streamable_http_app()
+        app.add_middleware(BearerAuthMiddleware, token=token)
+
+        print("Bearer-token authentication enabled", file=sys.stderr)
+        print(f"Listening on {host}:{port} (streamable-http)", file=sys.stderr)
+        uvicorn.run(app, host=host, port=port, log_level="info")
+    else:
+        print(
+            "WARNING: MCP_AUTH_TOKEN not set — server is unauthenticated",
+            file=sys.stderr,
+        )
+        mcp.run(transport="streamable-http", host=host, port=port)
 
 
 if __name__ == "__main__":

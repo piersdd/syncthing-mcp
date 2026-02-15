@@ -3,6 +3,8 @@
 from contextlib import asynccontextmanager
 
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from syncthing_mcp.registry import get_all_instances
 
@@ -23,7 +25,19 @@ async def app_lifespan(app):
     yield {}
 
 
-mcp = FastMCP("syncthing_mcp", lifespan=app_lifespan)
+mcp = FastMCP(
+    "syncthing_mcp",
+    lifespan=app_lifespan,
+    stateless_http=True,
+    json_response=True,
+)
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request: Request) -> JSONResponse:
+    """Unauthenticated health-check endpoint for Docker / Traefik probes."""
+    return JSONResponse({"status": "ok"})
+
 
 # Import all tool modules so they register with `mcp` via decorators.
 import syncthing_mcp.tools  # noqa: E402, F401
