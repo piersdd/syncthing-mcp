@@ -14,21 +14,16 @@ services:
       MCP_TRANSPORT: streamable-http
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8000"
-      # MCP_AUTH_TOKEN is set in .env
-      # SYNCTHING_INSTANCES is set in .env
     expose:
       - "8000"
     networks:
       - traefik
     labels:
-      # --- Traefik v2 / v3 labels ---
       traefik.enable: "true"
       traefik.http.routers.syncthing-mcp.rule: Host(`syncthing-mcp.${DOMAIN:?set DOMAIN in .env}`)
       traefik.http.routers.syncthing-mcp.entrypoints: websecure
       traefik.http.routers.syncthing-mcp.tls.certresolver: letsencrypt
       traefik.http.services.syncthing-mcp.loadbalancer.server.port: "8000"
-
-      # Health check route (Traefik can use this for backends).
       traefik.http.services.syncthing-mcp.loadbalancer.healthcheck.path: /health
       traefik.http.services.syncthing-mcp.loadbalancer.healthcheck.interval: 30s
 

@@ -24,8 +24,6 @@ def _run_http() -> None:
     token = os.environ.get("MCP_AUTH_TOKEN", "").strip()
 
     if token:
-        # Wrap the ASGI app with bearer-token middleware and run via
-        # uvicorn directly so we keep the session-manager lifespan intact.
         import uvicorn
 
         from syncthing_mcp.auth import BearerAuthMiddleware
