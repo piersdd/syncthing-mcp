@@ -1,11 +1,10 @@
 """Tools for instance management and listing folders (config-level)."""
 
-import json
 from typing import Any
 
-from syncthing_mcp.models import EmptyInput
+from syncthing_mcp.formatters import fmt, format_folder
+from syncthing_mcp.models import ReadParams
 from syncthing_mcp.registry import (
-    format_bytes,
     get_all_instances,
     get_instance,
     handle_error_global,
@@ -23,12 +22,8 @@ from syncthing_mcp.server import mcp
         "openWorldHint": False,
     },
 )
-async def syncthing_list_instances(params: EmptyInput) -> str:
-    """List all configured Syncthing instances and probe their availability.
-
-    Returns:
-        str: JSON array with instance name, URL, availability, and device ID.
-    """
+async def syncthing_list_instances(params: ReadParams) -> str:
+    """List all configured Syncthing instances and probe their availability."""
     results = []
     for name, client in get_all_instances().items():
         entry: dict[str, Any] = {"name": name, "url": client.url}
@@ -42,20 +37,19 @@ async def syncthing_list_instances(params: EmptyInput) -> str:
                 if dev.get("deviceID") == my_id:
                     my_name = dev.get("name", my_id[:8])
                     break
-            entry.update(
-                {
-                    "available": True,
-                    "myID": my_id,
-                    "deviceName": my_name,
-                    "version": version.get("version"),
-                    "numFolders": len(config.get("folders", [])),
-                    "numDevices": len(config.get("devices", [])),
-                }
-            )
+            entry.update({
+                "available": True,
+                "deviceName": my_name,
+                "version": version.get("version"),
+                "folders": len(config.get("folders", [])),
+                "devices": len(config.get("devices", [])),
+            })
+            if not params.concise:
+                entry["myID"] = my_id
         except Exception as exc:
             entry.update({"available": False, "error": str(exc)})
         results.append(entry)
-    return json.dumps(results, indent=2)
+    return fmt(results, concise=params.concise)
 
 
 @mcp.tool(
@@ -68,37 +62,33 @@ async def syncthing_list_instances(params: EmptyInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_list_folders(params: EmptyInput) -> str:
-    """List all configured Syncthing folders with their labels, paths, type, and shared devices.
-
-    Returns:
-        str: JSON array of folders with id, label, path, type, paused, and list of shared device names/IDs.
-    """
+async def syncthing_list_folders(params: ReadParams) -> str:
+    """All configured folders with labels, types, and device counts."""
     try:
         client = get_instance(params.instance)
         config = await client._get("/rest/config")
         folders = config.get("folders", [])
-        devices = {
-            d["deviceID"]: d.get("name", d["deviceID"][:8])
-            for d in config.get("devices", [])
-        }
-        result = []
-        for f in folders:
-            shared = []
-            for d in f.get("devices", []):
-                did = d.get("deviceID", "")
-                shared.append({"deviceID": did, "name": devices.get(did, did[:8])})
-            result.append(
-                {
+        if params.concise:
+            result = [format_folder(f, concise=True) for f in folders]
+        else:
+            devices_map = {
+                d["deviceID"]: d.get("name", d["deviceID"][:8])
+                for d in config.get("devices", [])
+            }
+            result = []
+            for f in folders:
+                shared = [
+                    {"deviceID": d.get("deviceID", ""), "name": devices_map.get(d.get("deviceID", ""), "")}
+                    for d in f.get("devices", [])
+                ]
+                result.append({
                     "id": f["id"],
                     "label": f.get("label", f["id"]),
                     "path": f.get("path", ""),
                     "type": f.get("type", "sendreceive"),
                     "paused": f.get("paused", False),
                     "sharedWith": shared,
-                    "numDevices": len(shared),
-                }
-            )
-        return json.dumps(result, indent=2)
+                })
+        return fmt(result, concise=params.concise)
     except Exception as e:
         return handle_error_global(e)

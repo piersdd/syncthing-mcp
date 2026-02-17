@@ -7,12 +7,10 @@ from syncthing_mcp.client import SyncthingClient
 
 
 def format_bytes(n: int) -> str:
-    """Human-readable byte size."""
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(n) < 1024:
-            return f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{n:.1f} PB"
+    """Human-readable byte size.  Delegates to formatters.format_bytes."""
+    from syncthing_mcp.formatters import format_bytes as _fb
+
+    return _fb(n)
 
 
 def load_instances() -> dict[str, SyncthingClient]:

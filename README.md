@@ -4,13 +4,16 @@ An MCP (Model Context Protocol) server for [Syncthing](https://syncthing.net/) �
 
 Built to give AI assistants (Claude, etc.) read and control access to Syncthing's REST API, with a focus on **replication awareness**: understanding which folders are fully replicated across devices so you can confidently reclaim local disk space.
 
-## Why
+## Key Features
 
-Syncthing syncs folders across devices, but its web UI doesn't make it easy to answer a simple question: *"Which datasets on this machine are safely backed up elsewhere, and how much space would I recover by removing them locally?"*
+- **Token-efficient output** — compact JSON by default; `concise=false` for full details
+- **Multi-instance** — manage multiple Syncthing nodes from a single server
+- **Replication analysis** — safe-to-remove flags and reclaimable space calculation
+- **Syncthing v2.x compatible** — tested against v2.0.x REST API
+- **HTTP transport** — Streamable HTTP with bearer-token auth, Cloudflare Tunnel support
+- **SKILL.md** — LLM skill guide for optimal tool usage
 
-This MCP server exposes that information as structured tool calls, so you can ask an AI assistant to audit your replication status and guide you through safe cleanup.
-
-## Tools (36 total)
+## Tools (39 total)
 
 ### Instance Management
 
@@ -23,30 +26,31 @@ This MCP server exposes that information as structured tool calls, so you can as
 | Tool | Description | Mutating |
 |------|-------------|----------|
 | `syncthing_system_status` | Device ID, name, uptime, version | No |
-| `syncthing_list_folders` | All folders with paths, types, and shared device lists | No |
-| `syncthing_list_devices` | All devices with connection status and last seen | No |
-| `syncthing_connections` | Active connection details (addresses, crypto, throughput) | No |
+| `syncthing_list_folders` | All folders with types and device counts | No |
+| `syncthing_list_devices` | All devices with connection status | No |
+| `syncthing_connections` | Active connection details | No |
+| `syncthing_device_stats` | Per-device statistics (last seen, duration) | No |
 | `syncthing_system_errors` | Recent system errors and warnings | No |
 | `syncthing_clear_errors` | Clear the system error log | Yes |
-| `syncthing_system_log` | Recent log entries with timestamps and levels | No |
+| `syncthing_system_log` | Recent log entries | No |
 | `syncthing_recent_changes` | Recent file change events (local + remote) | No |
-| `syncthing_health_summary` | Single-call health overview: status, alerts, folder/device/pending counts | No |
-| `syncthing_check_upgrade` | Check if a newer version of Syncthing is available | No |
+| `syncthing_health_summary` | Single-call health overview with alerts | No |
+| `syncthing_check_upgrade` | Check for newer Syncthing version | No |
 
 ### Folder Status & Replication
 
 | Tool | Description | Mutating |
 |------|-------------|----------|
-| `syncthing_folder_status` | Detailed status for a single folder (files, bytes, sync state) | No |
+| `syncthing_folder_status` | Detailed folder metrics (expensive call) | No |
 | `syncthing_folder_completion` | Per-device completion % for a folder | No |
-| `syncthing_replication_report` | Analyses all folders, flags safe-to-remove, calculates reclaimable space | No |
+| `syncthing_replication_report` | All folders: safe-to-remove + reclaimable space | No |
 | `syncthing_folder_errors` | Current sync errors for a folder | No |
 
 ### Device Status
 
 | Tool | Description | Mutating |
 |------|-------------|----------|
-| `syncthing_device_completion` | Aggregated completion for a device across all shared folders | No |
+| `syncthing_device_completion` | Aggregated completion for a device | No |
 
 ### Folder Operations
 
@@ -60,16 +64,17 @@ This MCP server exposes that information as structured tool calls, so you can as
 
 | Tool | Description | Mutating |
 |------|-------------|----------|
-| `syncthing_browse_folder` | Browse folder contents at a path prefix (directory listing from Syncthing's DB) | No |
-| `syncthing_file_info` | Detailed info about a specific file (versions, availability, conflicts) | No |
-| `syncthing_folder_need` | List out-of-sync files a folder still needs (with pagination) | No |
+| `syncthing_browse_folder` | Browse folder contents (directory listing from DB) | No |
+| `syncthing_file_info` | Detailed info about a specific file | No |
+| `syncthing_folder_need` | Out-of-sync files this folder needs (paginated) | No |
+| `syncthing_remote_need` | Files a remote device needs from us (paginated) | No |
 
 ### Conflict Resolution
 
 | Tool | Description | Mutating |
 |------|-------------|----------|
-| `syncthing_override_folder` | Override remote changes on a send-only folder (make local authoritative) | Yes |
-| `syncthing_revert_folder` | Revert local changes on a receive-only folder (pull remote state) | Yes |
+| `syncthing_override_folder` | Override remote changes (send-only folder) | Yes |
+| `syncthing_revert_folder` | Revert local changes (receive-only folder) | Yes |
 
 ### Config Mutation: Pending Devices & Folders
 
@@ -77,9 +82,9 @@ This MCP server exposes that information as structured tool calls, so you can as
 |------|-------------|----------|
 | `syncthing_pending_devices` | List pending device connection requests | No |
 | `syncthing_pending_folders` | List pending folder share offers | No |
-| `syncthing_accept_device` | Accept a pending device (adds to config with defaults) | Yes |
+| `syncthing_accept_device` | Accept a pending device | Yes |
 | `syncthing_reject_device` | Dismiss a pending device request | Yes |
-| `syncthing_accept_folder` | Accept a pending folder offer (uses folder defaults template) | Yes |
+| `syncthing_accept_folder` | Accept a pending folder offer | Yes |
 | `syncthing_reject_folder` | Dismiss a pending folder offer | Yes |
 
 ### Config Mutation: Restart & Ignore Patterns
@@ -89,9 +94,24 @@ This MCP server exposes that information as structured tool calls, so you can as
 | `syncthing_restart_required` | Check if config changes require a restart | No |
 | `syncthing_restart` | Restart the Syncthing service | Yes |
 | `syncthing_get_ignores` | Get .stignore patterns for a folder | No |
-| `syncthing_set_ignores` | Set .stignore patterns for a folder (replaces all) | Yes |
-| `syncthing_get_default_ignores` | Get default ignore patterns for new folders | No |
-| `syncthing_set_default_ignores` | Set default ignore patterns for new folders | Yes |
+| `syncthing_set_ignores` | Set .stignore patterns for a folder | Yes |
+| `syncthing_get_default_ignores` | Get default ignore patterns | No |
+| `syncthing_set_default_ignores` | Set default ignore patterns | Yes |
+
+## Token Efficiency
+
+All read tools default to `concise=true`, producing compact JSON with minimal fields and
+short device IDs. Set `concise=false` for full details when debugging.
+
+| Mode | Output style | Use case |
+|------|-------------|----------|
+| `concise=true` (default) | Compact JSON, short IDs, essential fields | Normal operation |
+| `concise=false` | Pretty JSON, full device IDs, all fields | Debugging, raw data |
+
+Large responses are automatically truncated at 25,000 characters with guidance to use
+pagination or filters.
+
+See [SKILL.md](SKILL.md) for the complete LLM skill guide.
 
 ## Project Structure
 
@@ -99,20 +119,25 @@ This MCP server exposes that information as structured tool calls, so you can as
 syncthing-mcp/
 ├── src/syncthing_mcp/
 │   ├── __init__.py          # Package version
-│   ├── __main__.py          # Entry point
+│   ├── __main__.py          # Entry point (stdio + HTTP transport)
+│   ├── auth.py              # Bearer token middleware
 │   ├── client.py            # SyncthingClient (HTTP methods + error handling)
-│   ├── models.py            # Pydantic input models
+│   ├── formatters.py        # Token-efficient formatting layer
+│   ├── models.py            # Pydantic input models (ReadParams / WriteParams)
 │   ├── registry.py          # Multi-instance registry from env vars
 │   ├── server.py            # FastMCP server + lifespan
 │   └── tools/
 │       ├── system.py        # System status, health, errors, log, restart, upgrade
-│       ├── folders.py       # Folder status, completion, replication, operations, file queries
-│       ├── devices.py       # Device completion, connections
+│       ├── folders.py       # Folder status, completion, replication, file queries
+│       ├── devices.py       # Device listing, completion, connections, stats
 │       ├── config.py        # Pending accept/reject, ignore patterns
 │       └── instances.py     # Instance listing, folder listing
-├── tests/                   # 96 tests with respx HTTP mocking
+├── tests/                   # Tests with respx HTTP mocking
+├── SKILL.md                 # LLM skill guide
 ├── pyproject.toml
-└── README.md
+├── Dockerfile
+├── docker-compose.yml       # Traefik reverse proxy (HTTPS/ACME)
+└── docker-compose.tunnel.yml # Cloudflare Tunnel (zero-trust)
 ```
 
 ## Multi-Instance Support
@@ -150,7 +175,7 @@ Every tool accepts an optional `instance` parameter to target a specific node. W
 
 ## Safe Removal Workflow
 
-1. Run `syncthing_replication_report` — review which folders show `safeToRemove: true`
+1. Run `syncthing_replication_report` — review which folders show `safe: true`
 2. Confirm the fully-replicated remote device(s) are the ones you expect
 3. `syncthing_pause_folder` — stops Syncthing from propagating local changes
 4. Delete the local data outside of Syncthing
@@ -158,7 +183,7 @@ Every tool accepts an optional `instance` parameter to target a specific node. W
 
 > **Important:** Always pause before deleting. In a `sendreceive` folder, deleting files without pausing will propagate the deletion to all connected devices.
 
-The `safeToRemove` flag requires: at least one remote device at 100% completion with `remoteState: valid`, the folder in `idle` state, and the folder not paused. This is deliberately conservative.
+The `safe` flag requires: at least one remote device at 100% completion with `remoteState: valid`, the folder in `idle` state, and the folder not paused. This is deliberately conservative.
 
 ## Setup
 
@@ -180,11 +205,7 @@ uv sync
 
 Open the Syncthing web UI → Actions → Settings → API Key.
 
-Alternatively, find it in your Syncthing config file under `<gui><apikey>`.
-
 ### Configure Claude Desktop (single instance)
-
-Add to your Claude Desktop MCP config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
 ```json
 {
@@ -204,32 +225,80 @@ Add to your Claude Desktop MCP config (`~/Library/Application Support/Claude/cla
 }
 ```
 
-### Running Tests
+## HTTP Transport
+
+### Streamable HTTP (direct)
+
+```bash
+MCP_TRANSPORT=streamable-http MCP_AUTH_TOKEN=secret MCP_PORT=8000 syncthing-mcp
+```
+
+### Docker + Traefik (HTTPS with ACME/Let's Encrypt)
+
+```bash
+cp .env.example .env   # edit API keys and DOMAIN
+docker compose up -d
+```
+
+This deploys behind Traefik with automatic Let's Encrypt TLS certificates.
+The MCP endpoint is available at `https://syncthing-mcp.<DOMAIN>/mcp`.
+
+### Docker + Cloudflare Tunnel (zero-trust, no open ports)
+
+```bash
+cp .env.example .env   # edit API keys and CLOUDFLARE_TUNNEL_TOKEN
+docker compose -f docker-compose.tunnel.yml up -d
+```
+
+Create a tunnel at [Cloudflare Zero Trust](https://one.dash.cloudflare.com) → Networks → Tunnels.
+Point the tunnel's public hostname to `http://syncthing-mcp:8000`.
+Bearer token auth (`MCP_AUTH_TOKEN`) secures the endpoint; `/health` is unauthenticated for probes.
+
+### Claude Code (remote HTTP)
+
+```json
+{
+  "mcpServers": {
+    "syncthing": {
+      "type": "streamable-http",
+      "url": "https://syncthing-mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCP_AUTH_TOKEN"
+      }
+    }
+  }
+}
+```
+
+## Running Tests
 
 ```bash
 uv sync
 uv run pytest -v
 ```
 
-### Environment Variables
+## Environment Variables
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `SYNCTHING_API_KEY` | Yes* | — | API key (single-instance mode) |
 | `SYNCTHING_URL` | No | `http://localhost:8384` | Base URL (single-instance mode) |
-| `SYNCTHING_INSTANCES` | No | — | JSON object for multi-instance mode (overrides the above) |
+| `SYNCTHING_INSTANCES` | No | — | JSON object for multi-instance mode |
+| `MCP_TRANSPORT` | No | `stdio` | Transport: `stdio` or `streamable-http` |
+| `MCP_HOST` | No | `0.0.0.0` | HTTP listen host |
+| `MCP_PORT` | No | `8000` | HTTP listen port |
+| `MCP_AUTH_TOKEN` | No | — | Bearer token for HTTP transport |
+| `DOMAIN` | No | — | FQDN for Traefik TLS (docker-compose.yml) |
+| `CLOUDFLARE_TUNNEL_TOKEN` | No | — | Tunnel token (docker-compose.tunnel.yml) |
 
 \* Required unless `SYNCTHING_INSTANCES` is set.
 
 ## Performance Notes
 
-- `syncthing_folder_status` and `syncthing_replication_report` call Syncthing's `/rest/db/status` endpoint, which the Syncthing docs describe as "an expensive call, increasing CPU and RAM usage on the device." Use judiciously on low-power hardware.
-- The replication report makes one `/rest/db/completion` call per remote device per folder. On setups with many folders and devices, this can generate significant API traffic.
-- `syncthing_health_summary` calls `/rest/db/status` for each folder — equivalent cost to the replication report.
-
-## Contributing
-
-Issues and PRs welcome.
+- `syncthing_folder_status` and `syncthing_replication_report` call Syncthing's `/rest/db/status` endpoint, which is expensive (high CPU/RAM on the Syncthing side). Use judiciously on low-power hardware.
+- The replication report makes one `/rest/db/completion` call per remote device per folder.
+- `syncthing_health_summary` calls `/rest/db/status` for each folder — equivalent cost.
+- Syncthing v2.x uses SQLite (replacing LevelDB). First launch after v1→v2 migration can be lengthy.
 
 ## License
 
