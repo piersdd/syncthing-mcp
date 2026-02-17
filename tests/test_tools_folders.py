@@ -52,7 +52,7 @@ class TestFolderCompletion:
 
         mock_api.get("/rest/db/completion").respond(json=make_completion(100.0))
         result = json.loads(await syncthing_folder_completion(FolderInput(folder_id=FOLDER_ID)))
-        assert result["fullyReplicatedOn"] == 1
+        assert result["fullyReplicated"] == 1
         assert result["devices"][0]["completion"] == 100.0
 
     async def test_partially_replicated(self, mock_api):
@@ -60,7 +60,7 @@ class TestFolderCompletion:
 
         mock_api.get("/rest/db/completion").respond(json=make_completion(75.0, "unknown"))
         result = json.loads(await syncthing_folder_completion(FolderInput(folder_id=FOLDER_ID)))
-        assert result["fullyReplicatedOn"] == 0
+        assert result["fullyReplicated"] == 0
 
     async def test_folder_not_found(self, mock_api):
         from syncthing_mcp.tools.folders import syncthing_folder_completion
@@ -76,8 +76,8 @@ class TestReplicationReport:
         mock_api.get("/rest/db/status").respond(json=make_db_status())
         mock_api.get("/rest/db/completion").respond(json=make_completion(100.0))
         result = json.loads(await syncthing_replication_report(EmptyInput()))
-        assert result["summary"]["safeToRemoveCount"] == 1
-        assert result["folders"][0]["safeToRemove"] is True
+        assert result["summary"]["safe"] == 1
+        assert result["folders"][0]["safe"] is True
 
     async def test_not_safe_when_incomplete(self, mock_api):
         from syncthing_mcp.tools.folders import syncthing_replication_report
@@ -85,7 +85,7 @@ class TestReplicationReport:
         mock_api.get("/rest/db/status").respond(json=make_db_status())
         mock_api.get("/rest/db/completion").respond(json=make_completion(50.0))
         result = json.loads(await syncthing_replication_report(EmptyInput()))
-        assert result["summary"]["safeToRemoveCount"] == 0
+        assert result["summary"]["safe"] == 0
 
 
 class TestPauseFolder:
@@ -116,7 +116,7 @@ class TestResumeFolder:
         )
         result = json.loads(await syncthing_resume_folder(PauseFolderInput(folder_id=FOLDER_ID)))
         assert result["status"] == "resumed"
-        assert result["folderType"] == "sendreceive"
+        assert result["type"] == "sendreceive"
 
 
 class TestScanFolder:
@@ -134,7 +134,7 @@ class TestFolderErrors:
 
         mock_api.get("/rest/folder/errors").respond(json={"errors": None, "page": 1})
         result = json.loads(await syncthing_folder_errors(FolderInput(folder_id=FOLDER_ID)))
-        assert result["errorCount"] == 0
+        assert result["count"] == 0
 
 
 class TestBrowseFolder:
@@ -172,7 +172,8 @@ class TestFileInfo:
             FileInfoInput(folder_id=FOLDER_ID, file_path="test.txt")
         ))
         assert result["file"] == "test.txt"
-        assert result["global"]["sizeFormatted"] == "1.0 KB"
+        # Concise mode returns globalSize at top level
+        assert result["globalSize"] == "1.0 KB"
 
 
 class TestFolderNeed:

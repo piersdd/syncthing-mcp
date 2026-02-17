@@ -33,7 +33,8 @@ class TestSystemStatus:
         from syncthing_mcp.tools.system import syncthing_system_status
 
         result = json.loads(await syncthing_system_status(EmptyInput()))
-        assert result["myID"] == DEVICE_ID_LOCAL
+        # Concise mode truncates device ID to 8 chars
+        assert result["myID"] == DEVICE_ID_LOCAL[:8]
         assert result["deviceName"] == "local-dev"
         assert result["version"] == "v1.28.0"
         assert result["instance"] == "default"
@@ -44,7 +45,7 @@ class TestSystemErrors:
         from syncthing_mcp.tools.system import syncthing_system_errors
 
         result = json.loads(await syncthing_system_errors(EmptyInput()))
-        assert result["errorCount"] == 0
+        assert result["count"] == 0
 
     async def test_with_errors(self, mock_api):
         from syncthing_mcp.tools.system import syncthing_system_errors
@@ -53,7 +54,7 @@ class TestSystemErrors:
             json={"errors": [{"when": "2025-01-01", "message": "disk full"}]}
         )
         result = json.loads(await syncthing_system_errors(EmptyInput()))
-        assert result["errorCount"] == 1
+        assert result["count"] == 1
 
 
 class TestClearErrors:
@@ -70,7 +71,7 @@ class TestSystemLog:
         from syncthing_mcp.tools.system import syncthing_system_log
 
         result = json.loads(await syncthing_system_log(EmptyInput()))
-        assert result["messageCount"] == 0
+        assert result["count"] == 0
 
 
 class TestRecentChanges:
@@ -81,7 +82,7 @@ class TestRecentChanges:
             {"id": 1, "type": "LocalChangeDetected", "data": {"path": "file.txt"}}
         ])
         result = json.loads(await syncthing_recent_changes(EmptyInput()))
-        assert result["eventCount"] == 1
+        assert result["count"] == 1
 
 
 class TestRestartRequired:
@@ -118,7 +119,7 @@ class TestCheckUpgrade:
 
         mock_api.get("/rest/system/upgrade").respond(status_code=501)
         result = json.loads(await syncthing_check_upgrade(EmptyInput()))
-        assert "not available" in result["message"]
+        assert result["upgradeCheck"] == "unavailable"
 
 
 class TestHealthSummary:
@@ -128,7 +129,7 @@ class TestHealthSummary:
         mock_api.get("/rest/db/status").respond(json=make_db_status())
         result = json.loads(await syncthing_health_summary(EmptyInput()))
         assert result["status"] == "good"
-        assert result["summary"]["foldersIdle"] == 1
+        assert result["summary"]["idle"] == 1
 
     async def test_error_state(self, mock_api):
         from syncthing_mcp.tools.system import syncthing_health_summary

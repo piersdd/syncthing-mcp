@@ -1,0 +1,44 @@
+---
+# Syncthing MCP — Cloudflare Tunnel deployment
+#
+# Exposes the MCP server via a Cloudflare Tunnel (zero-trust, no open ports).
+# Requires a Cloudflare Tunnel token — create one at:
+#   https://one.dash.cloudflare.com → Networks → Tunnels → Create
+#
+# Usage:
+#   docker compose -f docker-compose.tunnel.yml up -d
+#
+# The tunnel routes traffic to the MCP server on port 8000.
+# Bearer token auth (MCP_AUTH_TOKEN) secures the MCP endpoint.
+# The /health endpoint is unauthenticated for Cloudflare health probes.
+
+services:
+  syncthing-mcp:
+    build: .
+    container_name: syncthing-mcp
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8000"
+    expose:
+      - "8000"
+    networks:
+      - tunnel
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: syncthing-mcp-tunnel
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
+    networks:
+      - tunnel
+    depends_on:
+      - syncthing-mcp
+
+networks:
+  tunnel:
+    driver: bridge

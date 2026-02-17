@@ -1,16 +1,12 @@
 """System status, health, errors, log, restart, and upgrade tools."""
 
-import json
 from typing import Any
 
 import httpx
 
-from syncthing_mcp.models import EmptyInput
-from syncthing_mcp.registry import (
-    format_bytes,
-    get_instance,
-    handle_error_global,
-)
+from syncthing_mcp.formatters import fmt, format_bytes, truncate
+from syncthing_mcp.models import ReadParams, WriteParams
+from syncthing_mcp.registry import get_instance, handle_error_global
 from syncthing_mcp.server import mcp
 
 
@@ -24,12 +20,8 @@ from syncthing_mcp.server import mcp
         "openWorldHint": False,
     },
 )
-async def syncthing_system_status(params: EmptyInput) -> str:
-    """Get Syncthing system status including this device's ID, name, uptime, and version.
-
-    Returns:
-        str: JSON with myID, device name, uptime, version, and connection stats.
-    """
+async def syncthing_system_status(params: ReadParams) -> str:
+    """Device ID, name, uptime, version, and folder/device counts."""
     try:
         client = get_instance(params.instance)
         status = await client._get("/rest/system/status")
@@ -41,20 +33,19 @@ async def syncthing_system_status(params: EmptyInput) -> str:
             if dev.get("deviceID") == my_id:
                 my_name = dev.get("name", my_id[:8])
                 break
-        return json.dumps(
-            {
-                "instance": client.name,
-                "myID": my_id,
-                "deviceName": my_name,
-                "uptime": status.get("uptime"),
-                "version": version.get("version"),
-                "os": version.get("os"),
-                "arch": version.get("arch"),
-                "numFolders": len(config.get("folders", [])),
-                "numDevices": len(config.get("devices", [])),
-            },
-            indent=2,
-        )
+        data: dict[str, Any] = {
+            "instance": client.name,
+            "myID": my_id[:8] if params.concise else my_id,
+            "deviceName": my_name,
+            "uptime": status.get("uptime"),
+            "version": version.get("version"),
+            "folders": len(config.get("folders", [])),
+            "devices": len(config.get("devices", [])),
+        }
+        if not params.concise:
+            data["os"] = version.get("os")
+            data["arch"] = version.get("arch")
+        return fmt(data, concise=params.concise)
     except Exception as e:
         if isinstance(e, ValueError):
             return handle_error_global(e)
@@ -74,24 +65,18 @@ async def syncthing_system_status(params: EmptyInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_system_errors(params: EmptyInput) -> str:
-    """Get recent system errors and warnings from Syncthing.
-
-    Returns:
-        str: JSON with error list, each containing 'when' timestamp and 'message'.
-    """
+async def syncthing_system_errors(params: ReadParams) -> str:
+    """Recent system errors and warnings."""
     try:
         client = get_instance(params.instance)
         result = await client._get("/rest/system/error")
         errors = result.get("errors", []) or []
-        return json.dumps(
-            {
-                "instance": client.name,
-                "errorCount": len(errors),
-                "errors": errors,
-            },
-            indent=2,
-        )
+        data: dict[str, Any] = {
+            "instance": client.name,
+            "count": len(errors),
+            "errors": errors,
+        }
+        return truncate(fmt(data, concise=params.concise))
     except Exception as e:
         return handle_error_global(e)
 
@@ -106,23 +91,12 @@ async def syncthing_system_errors(params: EmptyInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_clear_errors(params: EmptyInput) -> str:
-    """Clear the system error log.
-
-    Returns:
-        str: Confirmation message.
-    """
+async def syncthing_clear_errors(params: WriteParams) -> str:
+    """Clear the system error log."""
     try:
         client = get_instance(params.instance)
         await client._post("/rest/system/error/clear")
-        return json.dumps(
-            {
-                "status": "cleared",
-                "instance": client.name,
-                "message": "System error log has been cleared.",
-            },
-            indent=2,
-        )
+        return fmt({"status": "cleared", "instance": client.name})
     except Exception as e:
         return handle_error_global(e)
 
@@ -137,25 +111,18 @@ async def syncthing_clear_errors(params: EmptyInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_system_log(params: EmptyInput) -> str:
-    """Get recent system log entries from Syncthing.
-
-    Returns:
-        str: JSON with log messages, each containing 'when' timestamp, 'message',
-             and 'level'.
-    """
+async def syncthing_system_log(params: ReadParams) -> str:
+    """Recent system log entries."""
     try:
         client = get_instance(params.instance)
         result = await client._get("/rest/system/log")
         messages = result.get("messages", []) or []
-        return json.dumps(
-            {
-                "instance": client.name,
-                "messageCount": len(messages),
-                "messages": messages,
-            },
-            indent=2,
-        )
+        data: dict[str, Any] = {
+            "instance": client.name,
+            "count": len(messages),
+            "messages": messages,
+        }
+        return truncate(fmt(data, concise=params.concise))
     except Exception as e:
         return handle_error_global(e)
 
@@ -170,14 +137,8 @@ async def syncthing_system_log(params: EmptyInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_recent_changes(params: EmptyInput) -> str:
-    """Get recent file change events (local and remote) across all folders.
-
-    Uses a non-blocking poll of the Syncthing event stream with limit=50.
-
-    Returns:
-        str: JSON with recent LocalChangeDetected and RemoteChangeDetected events.
-    """
+async def syncthing_recent_changes(params: ReadParams) -> str:
+    """Recent file change events (local and remote) across all folders."""
     try:
         client = get_instance(params.instance)
         events = await client._get(
@@ -190,14 +151,22 @@ async def syncthing_recent_changes(params: EmptyInput) -> str:
         )
         if not isinstance(events, list):
             events = []
-        return json.dumps(
-            {
-                "instance": client.name,
-                "eventCount": len(events),
-                "events": events,
-            },
-            indent=2,
-        )
+        if params.concise:
+            events = [
+                {
+                    "type": e.get("type", "")[:6],  # "Local" or "Remote"
+                    "folder": e.get("data", {}).get("folderID", ""),
+                    "path": e.get("data", {}).get("path", ""),
+                    "action": e.get("data", {}).get("action", ""),
+                }
+                for e in events
+            ]
+        data: dict[str, Any] = {
+            "instance": client.name,
+            "count": len(events),
+            "events": events,
+        }
+        return truncate(fmt(data, concise=params.concise))
     except Exception as e:
         return handle_error_global(e)
 
@@ -212,22 +181,15 @@ async def syncthing_recent_changes(params: EmptyInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_restart_required(params: EmptyInput) -> str:
-    """Check if Syncthing requires a restart for configuration changes to take effect.
-
-    Returns:
-        str: JSON with restartRequired boolean.
-    """
+async def syncthing_restart_required(params: ReadParams) -> str:
+    """Check if Syncthing requires a restart for config changes to take effect."""
     try:
         client = get_instance(params.instance)
         result = await client._get("/rest/config/restart-required")
-        return json.dumps(
-            {
-                "instance": client.name,
-                "restartRequired": result.get("requiresRestart", False),
-            },
-            indent=2,
-        )
+        return fmt({
+            "instance": client.name,
+            "restartRequired": result.get("requiresRestart", False),
+        })
     except Exception as e:
         return handle_error_global(e)
 
@@ -242,31 +204,19 @@ async def syncthing_restart_required(params: EmptyInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_restart(params: EmptyInput) -> str:
-    """Restart the Syncthing service to apply pending configuration changes.
-
-    WARNING: This temporarily stops synchronization on all folders for this instance.
-
-    Returns:
-        str: Confirmation message.
-    """
+async def syncthing_restart(params: WriteParams) -> str:
+    """Restart the Syncthing service. Temporarily stops all sync activity."""
     try:
         client = get_instance(params.instance)
         try:
             await client._post("/rest/system/restart")
         except (httpx.ConnectError, httpx.RemoteProtocolError):
             pass  # Expected — Syncthing closes the connection as it restarts
-        return json.dumps(
-            {
-                "status": "restart_initiated",
-                "instance": client.name,
-                "message": (
-                    f"Syncthing on '{client.name}' is restarting. "
-                    "Connection may be lost briefly. Sync resumes automatically."
-                ),
-            },
-            indent=2,
-        )
+        return fmt({
+            "status": "restart_initiated",
+            "instance": client.name,
+            "message": f"Syncthing '{client.name}' is restarting.",
+        })
     except Exception as e:
         return handle_error_global(e)
 
@@ -281,38 +231,26 @@ async def syncthing_restart(params: EmptyInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_check_upgrade(params: EmptyInput) -> str:
-    """Check if a newer version of Syncthing is available.
-
-    Returns:
-        str: JSON with running version, latest version, and whether an upgrade
-             is available.
-    """
+async def syncthing_check_upgrade(params: ReadParams) -> str:
+    """Check if a newer version of Syncthing is available."""
     try:
         client = get_instance(params.instance)
         version = await client._get("/rest/system/version")
         try:
             upgrade = await client._get("/rest/system/upgrade")
-            return json.dumps(
-                {
-                    "instance": client.name,
-                    "running": version.get("version"),
-                    "latest": upgrade.get("latest"),
-                    "newer": upgrade.get("newer", False),
-                    "majorNewer": upgrade.get("majorNewer", False),
-                },
-                indent=2,
-            )
+            return fmt({
+                "instance": client.name,
+                "running": version.get("version"),
+                "latest": upgrade.get("latest"),
+                "newer": upgrade.get("newer", False),
+            }, concise=params.concise)
         except httpx.HTTPStatusError as ue:
             if ue.response.status_code == 501:
-                return json.dumps(
-                    {
-                        "instance": client.name,
-                        "running": version.get("version"),
-                        "message": "Upgrade check not available (disabled or unsupported).",
-                    },
-                    indent=2,
-                )
+                return fmt({
+                    "instance": client.name,
+                    "running": version.get("version"),
+                    "upgradeCheck": "unavailable",
+                })
             raise
     except Exception as e:
         return handle_error_global(e)
@@ -328,16 +266,9 @@ async def syncthing_check_upgrade(params: EmptyInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_health_summary(params: EmptyInput) -> str:
-    """Generate a single-call health overview: system status, folder states,
-    device connectivity, errors, and pending items.
-
-    Designed for quick triage — aggregates data from multiple endpoints.
-
-    Returns:
-        str: JSON with overall status ('good', 'warning', 'error'), summary
-             counts, alert list, and per-folder health.
-    """
+async def syncthing_health_summary(params: ReadParams) -> str:
+    """Single-call health overview: system status, folder states, device
+    connectivity, errors, and pending items. Start here for quick triage."""
     try:
         client = get_instance(params.instance)
 
@@ -368,31 +299,25 @@ async def syncthing_health_summary(params: EmptyInput) -> str:
 
         for f_cfg in folders:
             fid = f_cfg["id"]
-            entry: dict[str, Any] = {
-                "id": fid,
-                "label": f_cfg.get("label", fid),
-                "paused": f_cfg.get("paused", False),
-            }
             if f_cfg.get("paused", False):
                 paused_count += 1
-                entry["state"] = "paused"
+                folder_health.append({"id": fid, "state": "paused"})
             else:
                 try:
                     fstatus = await client._get(
                         "/rest/db/status", params={"folder": fid}
                     )
                     state = fstatus.get("state", "unknown")
-                    entry["state"] = state
-                    entry["needBytes"] = fstatus.get("needBytes", 0)
-                    entry["needSize"] = format_bytes(fstatus.get("needBytes", 0))
+                    entry: dict[str, Any] = {"id": fid, "state": state}
                     if state in ("syncing", "sync-preparing"):
                         syncing_count += 1
+                        entry["needSize"] = format_bytes(fstatus.get("needBytes", 0))
                     elif state == "error":
                         error_folders += 1
+                    folder_health.append(entry)
                 except Exception:
-                    entry["state"] = "unreachable"
                     error_folders += 1
-            folder_health.append(entry)
+                    folder_health.append({"id": fid, "state": "unreachable"})
 
         alerts: list[str] = []
         error_list = sys_errors.get("errors", []) or []
@@ -406,13 +331,13 @@ async def syncthing_health_summary(params: EmptyInput) -> str:
         if paused_count > 0:
             alerts.append(f"{paused_count} folder(s) paused")
         if syncing_count > 0:
-            alerts.append(f"{syncing_count} folder(s) currently syncing")
+            alerts.append(f"{syncing_count} folder(s) syncing")
         num_pending_dev = len(pending_devices) if isinstance(pending_devices, dict) else 0
         num_pending_fld = len(pending_folders) if isinstance(pending_folders, dict) else 0
         if num_pending_dev > 0:
-            alerts.append(f"{num_pending_dev} pending device request(s)")
+            alerts.append(f"{num_pending_dev} pending device(s)")
         if num_pending_fld > 0:
-            alerts.append(f"{num_pending_fld} pending folder offer(s)")
+            alerts.append(f"{num_pending_fld} pending folder(s)")
 
         if error_folders > 0 or len(error_list) > 0:
             overall = "error"
@@ -421,30 +346,25 @@ async def syncthing_health_summary(params: EmptyInput) -> str:
         else:
             overall = "good"
 
-        return json.dumps(
-            {
-                "instance": client.name,
-                "status": overall,
-                "uptime": sys_status.get("uptime"),
-                "summary": {
-                    "totalFolders": len(folders),
-                    "foldersIdle": sum(
-                        1 for f in folder_health if f.get("state") == "idle"
-                    ),
-                    "foldersSyncing": syncing_count,
-                    "foldersPaused": paused_count,
-                    "foldersError": error_folders,
-                    "totalDevices": len(config.get("devices", [])),
-                    "devicesOnline": online_count,
-                    "devicesOffline": offline_count,
-                    "systemErrors": len(error_list),
-                    "pendingDevices": num_pending_dev,
-                    "pendingFolders": num_pending_fld,
-                },
-                "alerts": alerts,
-                "folders": folder_health,
+        data: dict[str, Any] = {
+            "instance": client.name,
+            "status": overall,
+            "uptime": sys_status.get("uptime"),
+            "summary": {
+                "folders": len(folders),
+                "idle": sum(1 for f in folder_health if f.get("state") == "idle"),
+                "syncing": syncing_count,
+                "paused": paused_count,
+                "errors": error_folders,
+                "devicesOnline": online_count,
+                "devicesOffline": offline_count,
+                "pendingDevices": num_pending_dev,
+                "pendingFolders": num_pending_fld,
             },
-            indent=2,
-        )
+            "alerts": alerts,
+        }
+        if not params.concise:
+            data["folders"] = folder_health
+        return fmt(data, concise=params.concise)
     except Exception as e:
         return handle_error_global(e)

@@ -1,4 +1,4 @@
-"""Tests for device tools (list, completion, connections)."""
+"""Tests for device tools (list, completion, connections, stats)."""
 
 import json
 
@@ -41,7 +41,7 @@ class TestDeviceCompletion:
             DeviceInput(device_id=DEVICE_ID_REMOTE)
         ))
         assert result["completion"] == 100.0
-        assert result["needBytes"] == 0
+        assert result["needSize"] == "0.0 B"
 
 
 class TestConnections:
@@ -51,3 +51,12 @@ class TestConnections:
         result = json.loads(await syncthing_connections(EmptyInput()))
         assert len(result) == 2
         assert any(c["connected"] for c in result)
+
+
+class TestDeviceStats:
+    async def test_returns_stats(self, mock_api):
+        from syncthing_mcp.tools.devices import syncthing_device_stats
+
+        result = json.loads(await syncthing_device_stats(EmptyInput()))
+        assert len(result) >= 1
+        assert "lastSeen" in result[0]

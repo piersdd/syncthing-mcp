@@ -1,16 +1,16 @@
 """Config mutation tools: pending devices/folders, ignores, accept/reject."""
 
-import json
-
+from syncthing_mcp.formatters import fmt, truncate
 from syncthing_mcp.models import (
     AcceptDeviceInput,
     AcceptFolderInput,
-    DeviceInput,
-    EmptyInput,
-    FolderInput,
+    DeviceWriteParams,
+    FolderReadParams,
+    ReadParams,
     RejectFolderInput,
     SetDefaultIgnoresInput,
     SetIgnoresInput,
+    WriteParams,
 )
 from syncthing_mcp.registry import get_instance, handle_error_global
 from syncthing_mcp.server import mcp
@@ -31,18 +31,14 @@ from syncthing_mcp.server import mcp
         "openWorldHint": False,
     },
 )
-async def syncthing_pending_devices(params: EmptyInput) -> str:
-    """List remote devices that have tried to connect but are not yet configured.
-
-    Returns:
-        str: JSON object keyed by device ID, each with name, address, and time.
-    """
+async def syncthing_pending_devices(params: ReadParams) -> str:
+    """Remote devices that tried to connect but are not yet configured."""
     try:
         client = get_instance(params.instance)
         pending = await client._get("/rest/cluster/pending/devices")
-        return json.dumps(
+        return fmt(
             {"instance": client.name, "pendingDevices": pending},
-            indent=2,
+            concise=params.concise,
         )
     except Exception as e:
         return handle_error_global(e)
@@ -58,18 +54,14 @@ async def syncthing_pending_devices(params: EmptyInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_pending_folders(params: EmptyInput) -> str:
-    """List folders that remote devices have offered to share but are not yet accepted.
-
-    Returns:
-        str: JSON object keyed by folder ID, each listing offering devices with labels.
-    """
+async def syncthing_pending_folders(params: ReadParams) -> str:
+    """Folders that remote devices have offered to share but are not yet accepted."""
     try:
         client = get_instance(params.instance)
         pending = await client._get("/rest/cluster/pending/folders")
-        return json.dumps(
+        return fmt(
             {"instance": client.name, "pendingFolders": pending},
-            indent=2,
+            concise=params.concise,
         )
     except Exception as e:
         return handle_error_global(e)
@@ -86,17 +78,7 @@ async def syncthing_pending_folders(params: EmptyInput) -> str:
     },
 )
 async def syncthing_accept_device(params: AcceptDeviceInput) -> str:
-    """Accept a pending device by adding it to the Syncthing configuration.
-
-    The device will be added with 'dynamic' addressing. You can optionally
-    provide a friendly name.
-
-    Args:
-        params: AcceptDeviceInput with device_id and optional name.
-
-    Returns:
-        str: Confirmation message with the device details.
-    """
+    """Accept a pending device by adding it to the Syncthing configuration."""
     try:
         client = get_instance(params.instance)
         pending = await client._get("/rest/cluster/pending/devices")
@@ -109,16 +91,12 @@ async def syncthing_accept_device(params: AcceptDeviceInput) -> str:
         new_device["deviceID"] = params.device_id
         new_device["name"] = name
         await client._post("/rest/config/devices", body=new_device)
-        return json.dumps(
-            {
-                "status": "accepted",
-                "deviceID": params.device_id,
-                "name": name,
-                "instance": client.name,
-                "message": f"Device '{name}' ({params.device_id[:8]}...) has been added.",
-            },
-            indent=2,
-        )
+        return fmt({
+            "status": "accepted",
+            "deviceID": params.device_id[:8],
+            "name": name,
+            "instance": client.name,
+        })
     except Exception as e:
         return handle_error_global(e)
 
@@ -133,33 +111,19 @@ async def syncthing_accept_device(params: AcceptDeviceInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_reject_device(params: DeviceInput) -> str:
-    """Dismiss a pending device connection request.
-
-    This only clears the pending notification. The device can try again later;
-    for permanent blocking, use Syncthing's ignore-device feature via the web UI.
-
-    Args:
-        params: DeviceInput with device_id.
-
-    Returns:
-        str: Confirmation message.
-    """
+async def syncthing_reject_device(params: DeviceWriteParams) -> str:
+    """Dismiss a pending device connection request."""
     try:
         client = get_instance(params.instance)
         await client._delete(
             "/rest/cluster/pending/devices",
             params={"device": params.device_id},
         )
-        return json.dumps(
-            {
-                "status": "rejected",
-                "deviceID": params.device_id,
-                "instance": client.name,
-                "message": f"Pending device '{params.device_id[:8]}...' has been dismissed.",
-            },
-            indent=2,
-        )
+        return fmt({
+            "status": "rejected",
+            "deviceID": params.device_id[:8],
+            "instance": client.name,
+        })
     except Exception as e:
         return handle_error_global(e)
 
@@ -175,25 +139,13 @@ async def syncthing_reject_device(params: DeviceInput) -> str:
     },
 )
 async def syncthing_accept_folder(params: AcceptFolderInput) -> str:
-    """Accept a pending folder share offer by adding it to the configuration.
-
-    Uses the default folder configuration as a template. If no path is provided,
-    Syncthing's default folder path is used.
-
-    Args:
-        params: AcceptFolderInput with folder_id and optional path.
-
-    Returns:
-        str: Confirmation with assigned path and sharing details.
-    """
+    """Accept a pending folder share offer. Uses default folder config as template."""
     try:
         client = get_instance(params.instance)
         pending = await client._get("/rest/cluster/pending/folders")
         folder_pending = pending.get(params.folder_id, {})
         if not folder_pending:
-            return json.dumps(
-                {"error": f"Folder '{params.folder_id}' not found in pending offers."}
-            )
+            return fmt({"error": f"Folder '{params.folder_id}' not found in pending offers."})
         offering_devices = list(folder_pending.get("offeredBy", {}).keys())
         first_offer = next(iter(folder_pending.get("offeredBy", {}).values()), {})
         label = first_offer.get("label", params.folder_id)
@@ -210,21 +162,13 @@ async def syncthing_accept_folder(params: AcceptFolderInput) -> str:
             device_list.append({"deviceID": did})
         new_folder["devices"] = device_list
         await client._post("/rest/config/folders", body=new_folder)
-        return json.dumps(
-            {
-                "status": "accepted",
-                "folderID": params.folder_id,
-                "label": label,
-                "path": new_folder.get("path", "(default)"),
-                "sharedWith": offering_devices,
-                "instance": client.name,
-                "message": (
-                    f"Folder '{label}' ({params.folder_id}) has been added "
-                    f"at '{new_folder.get('path', '(default)')}'."
-                ),
-            },
-            indent=2,
-        )
+        return fmt({
+            "status": "accepted",
+            "folder": params.folder_id,
+            "label": label,
+            "path": new_folder.get("path", "(default)"),
+            "instance": client.name,
+        })
     except Exception as e:
         return handle_error_global(e)
 
@@ -240,31 +184,18 @@ async def syncthing_accept_folder(params: AcceptFolderInput) -> str:
     },
 )
 async def syncthing_reject_folder(params: RejectFolderInput) -> str:
-    """Dismiss a pending folder share offer.
-
-    Args:
-        params: RejectFolderInput with folder_id and optional device_id.
-                If device_id is omitted, rejects the offer from all devices.
-
-    Returns:
-        str: Confirmation message.
-    """
+    """Dismiss a pending folder share offer."""
     try:
         client = get_instance(params.instance)
         delete_params: dict[str, str] = {"folder": params.folder_id}
         if params.device_id:
             delete_params["device"] = params.device_id
         await client._delete("/rest/cluster/pending/folders", params=delete_params)
-        return json.dumps(
-            {
-                "status": "rejected",
-                "folderID": params.folder_id,
-                "deviceID": params.device_id or "(all)",
-                "instance": client.name,
-                "message": f"Pending folder offer for '{params.folder_id}' has been dismissed.",
-            },
-            indent=2,
-        )
+        return fmt({
+            "status": "rejected",
+            "folder": params.folder_id,
+            "instance": client.name,
+        })
     except Exception as e:
         return handle_error_global(e)
 
@@ -284,29 +215,21 @@ async def syncthing_reject_folder(params: RejectFolderInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_get_ignores(params: FolderInput) -> str:
-    """Get the current .stignore patterns for a folder.
-
-    Args:
-        params: FolderInput with folder_id.
-
-    Returns:
-        str: JSON with ignore patterns list and whether the folder has expanded patterns.
-    """
+async def syncthing_get_ignores(params: FolderReadParams) -> str:
+    """Get the .stignore patterns for a folder."""
     try:
         client = get_instance(params.instance)
         result = await client._get(
             "/rest/db/ignores", params={"folder": params.folder_id}
         )
-        return json.dumps(
-            {
-                "folder": params.folder_id,
-                "instance": client.name,
-                "patterns": result.get("ignore", []) or [],
-                "expanded": result.get("expanded", []) or [],
-            },
-            indent=2,
-        )
+        data = {
+            "folder": params.folder_id,
+            "instance": client.name,
+            "patterns": result.get("ignore", []) or [],
+        }
+        if not params.concise:
+            data["expanded"] = result.get("expanded", []) or []
+        return fmt(data, concise=params.concise)
     except Exception as e:
         return handle_error_global(e)
 
@@ -322,17 +245,7 @@ async def syncthing_get_ignores(params: FolderInput) -> str:
     },
 )
 async def syncthing_set_ignores(params: SetIgnoresInput) -> str:
-    """Set the .stignore patterns for a folder. Replaces all existing patterns.
-
-    Common patterns: '*.tmp', '.DS_Store', 'Thumbs.db', '(?d).Trash*',
-    '// #include common-ignores' (to include shared pattern files).
-
-    Args:
-        params: SetIgnoresInput with folder_id and patterns list.
-
-    Returns:
-        str: Confirmation with the applied patterns.
-    """
+    """Set .stignore patterns for a folder. Replaces all existing patterns."""
     try:
         client = get_instance(params.instance)
         await client._post(
@@ -340,17 +253,12 @@ async def syncthing_set_ignores(params: SetIgnoresInput) -> str:
             params={"folder": params.folder_id},
             body={"ignore": params.patterns},
         )
-        return json.dumps(
-            {
-                "status": "updated",
-                "folder": params.folder_id,
-                "instance": client.name,
-                "patternCount": len(params.patterns),
-                "patterns": params.patterns,
-                "message": f"Ignore patterns for '{params.folder_id}' have been updated.",
-            },
-            indent=2,
-        )
+        return fmt({
+            "status": "updated",
+            "folder": params.folder_id,
+            "instance": client.name,
+            "count": len(params.patterns),
+        })
     except Exception as e:
         return handle_error_global(e)
 
@@ -365,22 +273,15 @@ async def syncthing_set_ignores(params: SetIgnoresInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_get_default_ignores(params: EmptyInput) -> str:
-    """Get the default ignore patterns applied to newly created folders.
-
-    Returns:
-        str: JSON with default ignore pattern lines.
-    """
+async def syncthing_get_default_ignores(params: ReadParams) -> str:
+    """Default ignore patterns applied to newly created folders."""
     try:
         client = get_instance(params.instance)
         result = await client._get("/rest/config/defaults/ignores")
-        return json.dumps(
-            {
-                "instance": client.name,
-                "lines": result.get("lines", []) or [],
-            },
-            indent=2,
-        )
+        return fmt({
+            "instance": client.name,
+            "lines": result.get("lines", []) or [],
+        }, concise=params.concise)
     except Exception as e:
         return handle_error_global(e)
 
@@ -396,31 +297,17 @@ async def syncthing_get_default_ignores(params: EmptyInput) -> str:
     },
 )
 async def syncthing_set_default_ignores(params: SetDefaultIgnoresInput) -> str:
-    """Set the default ignore patterns for newly created folders.
-
-    These patterns will be automatically applied when new folders are added.
-
-    Args:
-        params: SetDefaultIgnoresInput with lines list.
-
-    Returns:
-        str: Confirmation with the applied patterns.
-    """
+    """Set the default ignore patterns for newly created folders."""
     try:
         client = get_instance(params.instance)
         await client._put(
             "/rest/config/defaults/ignores",
             body={"lines": params.lines},
         )
-        return json.dumps(
-            {
-                "status": "updated",
-                "instance": client.name,
-                "lineCount": len(params.lines),
-                "lines": params.lines,
-                "message": "Default ignore patterns have been updated for new folders.",
-            },
-            indent=2,
-        )
+        return fmt({
+            "status": "updated",
+            "instance": client.name,
+            "count": len(params.lines),
+        })
     except Exception as e:
         return handle_error_global(e)

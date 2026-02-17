@@ -1,13 +1,10 @@
-"""Device completion and connection tools."""
+"""Device listing, completion, connection, and stats tools."""
 
-import json
+from typing import Any
 
-from syncthing_mcp.models import DeviceInput, EmptyInput
-from syncthing_mcp.registry import (
-    format_bytes,
-    get_instance,
-    handle_error_global,
-)
+from syncthing_mcp.formatters import fmt, format_bytes, format_connection, format_device, truncate
+from syncthing_mcp.models import DeviceReadParams, ReadParams
+from syncthing_mcp.registry import get_instance, handle_error_global
 from syncthing_mcp.server import mcp
 
 
@@ -21,36 +18,24 @@ from syncthing_mcp.server import mcp
         "openWorldHint": False,
     },
 )
-async def syncthing_list_devices(params: EmptyInput) -> str:
-    """List all configured devices with their names, connection status, and last seen time.
-
-    Returns:
-        str: JSON array of devices with deviceID, name, connected, paused, address, lastSeen.
-    """
+async def syncthing_list_devices(params: ReadParams) -> str:
+    """All configured devices with connection status and last seen time."""
     try:
         client = get_instance(params.instance)
         config = await client._get("/rest/config")
         connections = await client._get("/rest/system/connections")
         stats = await client._get("/rest/stats/device")
         conn_data = connections.get("connections", {})
-        result = []
-        for dev in config.get("devices", []):
-            did = dev["deviceID"]
-            conn = conn_data.get(did, {})
-            stat = stats.get(did, {})
-            result.append(
-                {
-                    "deviceID": did,
-                    "name": dev.get("name", did[:8]),
-                    "connected": conn.get("connected", False),
-                    "paused": conn.get("paused", False),
-                    "address": conn.get("address", ""),
-                    "lastSeen": stat.get("lastSeen", ""),
-                    "inBytesTotal": conn.get("inBytesTotal", 0),
-                    "outBytesTotal": conn.get("outBytesTotal", 0),
-                }
+        result = [
+            format_device(
+                dev,
+                conn_data.get(dev["deviceID"]),
+                stats.get(dev["deviceID"]),
+                concise=params.concise,
             )
-        return json.dumps(result, indent=2)
+            for dev in config.get("devices", [])
+        ]
+        return fmt(result, concise=params.concise)
     except Exception as e:
         return handle_error_global(e)
 
@@ -65,34 +50,26 @@ async def syncthing_list_devices(params: EmptyInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_device_completion(params: DeviceInput) -> str:
-    """Get the aggregated sync completion for a specific remote device across all shared folders.
-
-    Args:
-        params: DeviceInput with device_id.
-
-    Returns:
-        str: JSON with overall completion %, globalBytes, needBytes for that device.
-    """
+async def syncthing_device_completion(params: DeviceReadParams) -> str:
+    """Aggregated sync completion for a remote device across all shared folders."""
     try:
         client = get_instance(params.instance)
         comp = await client._get(
             "/rest/db/completion", params={"device": params.device_id}
         )
-        return json.dumps(
-            {
-                "deviceID": params.device_id,
-                "instance": client.name,
-                "completion": round(comp.get("completion", 0), 2),
-                "globalBytes": comp.get("globalBytes", 0),
-                "globalSize": format_bytes(comp.get("globalBytes", 0)),
-                "needBytes": comp.get("needBytes", 0),
-                "needSize": format_bytes(comp.get("needBytes", 0)),
-                "needItems": comp.get("needItems", 0),
-                "remoteState": comp.get("remoteState", "unknown"),
-            },
-            indent=2,
-        )
+        data: dict[str, Any] = {
+            "device": params.device_id[:8] if params.concise else params.device_id,
+            "instance": client.name,
+            "completion": round(comp.get("completion", 0), 2),
+            "needSize": format_bytes(comp.get("needBytes", 0)),
+            "remoteState": comp.get("remoteState", "unknown"),
+        }
+        if not params.concise:
+            data["globalBytes"] = comp.get("globalBytes", 0)
+            data["globalSize"] = format_bytes(comp.get("globalBytes", 0))
+            data["needBytes"] = comp.get("needBytes", 0)
+            data["needItems"] = comp.get("needItems", 0)
+        return fmt(data, concise=params.concise)
     except Exception as e:
         return handle_error_global(e)
 
@@ -107,13 +84,8 @@ async def syncthing_device_completion(params: DeviceInput) -> str:
         "openWorldHint": False,
     },
 )
-async def syncthing_connections(params: EmptyInput) -> str:
-    """Get current connection details for all devices.
-
-    Returns:
-        str: JSON with per-device connection info including address,
-             bytes transferred, crypto, and connection type.
-    """
+async def syncthing_connections(params: ReadParams) -> str:
+    """Current connection details for all devices."""
     try:
         client = get_instance(params.instance)
         connections = await client._get("/rest/system/connections")
@@ -122,21 +94,47 @@ async def syncthing_connections(params: EmptyInput) -> str:
             d["deviceID"]: d.get("name", d["deviceID"][:8])
             for d in config.get("devices", [])
         }
-        result = []
-        for did, conn in connections.get("connections", {}).items():
-            result.append(
-                {
-                    "deviceID": did,
-                    "deviceName": devices_map.get(did, did[:8]),
-                    "connected": conn.get("connected", False),
-                    "paused": conn.get("paused", False),
-                    "address": conn.get("address", ""),
-                    "type": conn.get("type", ""),
-                    "crypto": conn.get("crypto", ""),
-                    "inBytesTotal": conn.get("inBytesTotal", 0),
-                    "outBytesTotal": conn.get("outBytesTotal", 0),
-                }
+        result = [
+            format_connection(
+                did, conn, devices_map.get(did, did[:8]), concise=params.concise,
             )
-        return json.dumps(result, indent=2)
+            for did, conn in connections.get("connections", {}).items()
+        ]
+        return fmt(result, concise=params.concise)
+    except Exception as e:
+        return handle_error_global(e)
+
+
+@mcp.tool(
+    name="syncthing_device_stats",
+    annotations={
+        "title": "Device Statistics",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def syncthing_device_stats(params: ReadParams) -> str:
+    """Per-device statistics: last seen time and connection duration."""
+    try:
+        client = get_instance(params.instance)
+        stats = await client._get("/rest/stats/device")
+        config = await client._get("/rest/config")
+        devices_map = {
+            d["deviceID"]: d.get("name", d["deviceID"][:8])
+            for d in config.get("devices", [])
+        }
+        result = []
+        for did, stat in stats.items():
+            entry: dict[str, Any] = {
+                "device": devices_map.get(did, did[:8]),
+                "lastSeen": stat.get("lastSeen", ""),
+            }
+            if not params.concise:
+                entry["deviceID"] = did
+                entry["lastConnectionDurationS"] = stat.get("lastConnectionDurationS", 0)
+            result.append(entry)
+        return fmt(result, concise=params.concise)
     except Exception as e:
         return handle_error_global(e)

@@ -140,7 +140,7 @@ class TestSetIgnores:
             SetIgnoresInput(folder_id=FOLDER_ID, patterns=["*.log", "node_modules"])
         ))
         assert result["status"] == "updated"
-        assert result["patternCount"] == 2
+        assert result["count"] == 2
 
 
 class TestGetDefaultIgnores:
