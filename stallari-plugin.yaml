@@ -2,7 +2,7 @@ name: syncthing-blade-mcp
 version: "0.3.1"
 description: "Syncthing replication management MCP — multi-instance, token-efficient output, safe disk-space reclamation"
 author: groupthink-dev
-licence: MIT
+license: MIT
 tier: certified
 author_type: first-party
 readiness: beta
